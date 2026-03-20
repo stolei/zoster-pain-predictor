@@ -5,14 +5,14 @@ import pandas as pd
 import shap
 import matplotlib.pyplot as plt
 
-# --- Load XGBoost Model ---
-# Ensure your saved model file is named 'XGB.pkl'
-model = joblib.load('XGB.pkl')
+# --- Load LightGBM Model ---
+# Ensure your saved model file is named 'LGBM.pkl'
+model = joblib.load('LGBM.pkl')
 
 # Load test data for SHAP (Ensure X_test.csv matches the new feature structure)
 X_test = pd.read_csv('X_test.csv')
 
-# Updated Feature Names (Must match the trained XGBoost model exactly)
+# Updated Feature Names (Must match the trained LightGBM model exactly)
 feature_names = ["opioid", "NRS", "age", "NMR", "ApoB"]
 
 # ------------------- Streamlit UI -------------------
@@ -47,7 +47,7 @@ features_df = pd.DataFrame([feature_values], columns=feature_names)
 # ------------------- Prediction -------------------
 st.markdown("---")
 if st.button("Predict Efficacy"):
-    # XGBoost Prediction
+    # LightGBM Prediction
     predicted_class = model.predict(features_df)[0]
     predicted_proba = model.predict_proba(features_df)[0]
 
@@ -70,19 +70,25 @@ if st.button("Predict Efficacy"):
     # ------------------- SHAP Analysis -------------------
     st.subheader("Model Explanation (SHAP)")
     
-    # Use TreeExplainer for XGBoost
+    # Use TreeExplainer for LightGBM
     explainer_shap = shap.TreeExplainer(model)
     shap_values = explainer_shap.shap_values(features_df)
     
-    # Handle SHAP output format
+    # Handle SHAP output format specifically for LightGBM
+    # LightGBM binary classification typically returns a list for both expected_value and shap_values
     if isinstance(shap_values, list):
-        s_val = shap_values[1]
+        s_val = shap_values[1]  # Extract SHAP values for the positive class (Outcome=1)
+        exp_val = explainer_shap.expected_value[1] # Extract expected value for the positive class
     else:
         s_val = shap_values
+        exp_val = explainer_shap.expected_value
 
+    # Clear previous plots to prevent overlapping if the button is clicked multiple times
+    plt.clf() 
+    
     plt.figure(figsize=(10, 3))
     shap.force_plot(
-        explainer_shap.expected_value, 
+        exp_val, 
         s_val, 
         features_df, 
         matplotlib=True,
