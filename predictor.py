@@ -5,94 +5,122 @@ import pandas as pd
 import shap
 import matplotlib.pyplot as plt
 
-# --- Load LightGBM Model ---
-# Ensure your saved model file is named 'LGBM.pkl'
-model = joblib.load('LGBM.pkl')
+# --- 1. Load Model & Data ---
+@st.cache_resource
+def load_model():
+    # Ensure 'LGBM.pkl' is in the same directory
+    model = joblib.load('LGBM.pkl')
+    return model
 
-# Load test data for SHAP (Ensure X_test.csv matches the new feature structure)
-X_test = pd.read_csv('X_test.csv')
+model = load_model()
 
-# Updated Feature Names (Must match the trained LightGBM model exactly)
-feature_names = ["opioid", "NRS", "age", "NMR", "ApoB"]
-
-# ------------------- Streamlit UI -------------------
-st.title("PRF Efficacy Predictor for Zoster-Associated Pain")
+# ------------------- 2. Streamlit UI Configuration -------------------
+st.set_page_config(page_title="PRF Efficacy Predictor", layout="wide")
+st.title("🛡️ PRF Efficacy Predictor for Zoster-Associated Pain")
+st.markdown("""
+This clinical decision support tool utilizes a **LightGBM machine learning model** to predict the efficacy of 
+**Pulsed Radiofrequency (PRF)** treatment for patients with herpes zoster-related pain.
+""")
 st.markdown("---")
 
-### Input Section
-st.subheader("Patient Clinical Data")
+# Layout: Input on the left, Results/Analytics on the right
+col1, col2 = st.columns([1, 1.5])
 
-# --- UI Layout Changed: All inputs in a single column ---
-opioid = st.selectbox("Opioid use:", options=[0, 1], format_func=lambda x: "User" if x == 1 else "Non-user")
-NRS = st.slider("Pain Score (NRS):", min_value=0, max_value=10, value=5)
-age = st.slider("Age:", min_value=0, max_value=120, value=50)
-ApoB = st.number_input("ApoB (g/L):", min_value=0.0, max_value=5.0, value=0.8, format="%.2f")
+with col1:
+    st.subheader("📋 Patient Clinical Inputs")
+    
+    # Feature 1: Opioid use (Binary)
+    opioid = st.selectbox("Opioid Use Status:", 
+                         options=[0, 1], 
+                         format_func=lambda x: "User" if x == 1 else "Non-user")
+    
+    # Feature 2: NRS Score (Continuous)
+    NRS = st.slider("Pain Intensity (NRS Score):", 
+                    min_value=0, max_value=10, value=5, 
+                    help="Numeric Rating Scale: 0 = No pain, 10 = Worst pain imaginable")
+    
+    # Feature 3: Age (Continuous)
+    age = st.slider("Patient Age:", min_value=18, max_value=110, value=60)
+    
+    # Feature 4: ApoB (Continuous)
+    ApoB = st.number_input("Apolipoprotein B (ApoB, g/L):", 
+                           min_value=0.01, max_value=5.0, value=0.80, format="%.2f")
 
-# Inputs for NMR calculation
-neutrophil = st.number_input("Neutrophil Count (10^9/L):", min_value=0.01, max_value=50.0, value=4.0, format="%.2f")
-monocyte = st.number_input("Monocyte Count (10^9/L):", min_value=0.01, max_value=10.0, value=0.5, format="%.2f")
+    # Feature 5: NMR Calculation (Neutrophil-to-Monocyte Ratio)
+    st.markdown("**Lab Results (for NMR calculation):**")
+    neutrophil = st.number_input("Neutrophil Count (10^9/L):", min_value=0.01, max_value=50.0, value=4.0)
+    monocyte = st.number_input("Monocyte Count (10^9/L):", min_value=0.01, max_value=10.0, value=0.5)
+    nmr_value = neutrophil / monocyte
+    st.caption(f"Calculated NMR: {nmr_value:.2f}")
 
-# ------------------- Background Logic -------------------
-# 1. Binary transformations
-nrs_binary = 1 if NRS > 6 else 0
-age_binary = 1 if age > 60 else 0
-
-# 2. NMR Calculation
-nmr_value = neutrophil / monocyte
-
-# 3. Final Feature Vector [opioid, NRS_bin, age_bin, NMR, ApoB]
-feature_values = [opioid, nrs_binary, age_binary, nmr_value, ApoB]
+# ------------------- 3. Prediction Logic -------------------
+# Feature Order must strictly match training: [opioid, NRS, age, NMR, ApoB]
+feature_names = ["opioid", "NRS", "age", "NMR", "ApoB"]
+feature_values = [opioid, NRS, age, nmr_value, ApoB]
 features_df = pd.DataFrame([feature_values], columns=feature_names)
 
-# ------------------- Prediction -------------------
+with col2:
+    st.subheader("🚀 Prediction & Analysis")
+    
+    if st.button("Generate Prediction"):
+        # Model Inference
+        predicted_class = model.predict(features_df)[0]
+        predicted_proba = model.predict_proba(features_df)[0]
+        prob_val = predicted_proba[1]  # Probability of positive outcome
+
+        # Visualization of Result
+        if predicted_class == 1:
+            st.success("### Outcome: Positive Response Likely")
+            st.metric(label="Probability of Efficacy", value=f"{prob_val*100:.1f}%")
+            st.info("✅ **Recommendation:** The patient is likely to benefit from PRF treatment based on the clinical profile.")
+        else:
+            st.error("### Outcome: Negative Response Likely")
+            st.metric(label="Probability of Efficacy", value=f"{prob_val*100:.1f}%")
+            st.warning("⚠️ **Recommendation:** Consider alternative therapies or adjunctive treatments, as predicted PRF efficacy is low.")
+
+        st.divider()
+
+        # ------------------- 4. SHAP Explanation -------------------
+        st.subheader("🔍 Individual Feature Contribution (SHAP)")
+        
+        try:
+            explainer = shap.TreeExplainer(model)
+            shap_values = explainer.shap_values(features_df)
+
+            # Robust handling of SHAP output formats for LightGBM
+            if isinstance(shap_values, list):
+                # Returns [class_0, class_1]
+                single_shap_values = shap_values[1][0, :]
+                base_value = explainer.expected_value[1]
+            elif len(shap_values.shape) == 3:
+                # Returns (samples, features, classes)
+                single_shap_values = shap_values[0, :, 1]
+                base_value = explainer.expected_value[1]
+            else:
+                # Standard 2D array
+                single_shap_values = shap_values[0, :]
+                base_value = explainer.expected_value
+
+            # Plotting
+            fig = plt.figure(figsize=(12, 3))
+            shap.force_plot(
+                base_value, 
+                single_shap_values, 
+                features_df.iloc[0, :], 
+                matplotlib=True, 
+                show=False
+            )
+            st.pyplot(plt.gcf())
+            
+            st.markdown("""
+            **How to read this plot:** * **Red arrows** (to the right) increase the probability of a positive outcome.  
+            * **Blue arrows** (to the left) decrease the probability.  
+            * The length of the arrow indicates the impact of that specific feature.
+            """)
+            
+        except Exception as e:
+            st.error(f"SHAP Analysis Error: {e}")
+
+# --- Footer ---
 st.markdown("---")
-if st.button("Predict Efficacy"):
-    # LightGBM Prediction
-    predicted_class = model.predict(features_df)[0]
-    predicted_proba = model.predict_proba(features_df)[0]
-
-    # Result Display
-    result_color = "green" if predicted_class == 1 else "red"
-    st.markdown(f"### Predicted Outcome: <span style='color:{result_color}'>{'Positive' if predicted_class == 1 else 'Negative'}</span>", unsafe_allow_html=True)
-    
-    prob_val = predicted_proba[1] * 100
-    st.write(f"**Probability of Positive Response:** {prob_val:.1f}%")
-
-    # Clinical Advice
-    if predicted_class == 1:
-        st.success(f"Recommendation: Proceed with PRF. The patient has a high likelihood ({prob_val:.1f}%) of pain relief.")
-    else:
-        st.warning(f"Recommendation: Consider adjusting treatment. Likelihood of PRF efficacy is low ({prob_val:.1f}%).")
-
-    # Display calculated NMR for clinician reference
-    #st.info(f"💡 Calculated NMR: {nmr_value:.2f} | Input Logic: NRS > 6: {nrs_binary}, Age > 60: {age_binary}")
-
-    # ------------------- SHAP Analysis -------------------
-    st.subheader("Model Explanation (SHAP)")
-    
-    # Use TreeExplainer for LightGBM
-    explainer_shap = shap.TreeExplainer(model)
-    shap_values = explainer_shap.shap_values(features_df)
-    
-    # Handle SHAP output format specifically for LightGBM
-    # LightGBM binary classification typically returns a list for both expected_value and shap_values
-    if isinstance(shap_values, list):
-        s_val = shap_values[1]  # Extract SHAP values for the positive class (Outcome=1)
-        exp_val = explainer_shap.expected_value[1] # Extract expected value for the positive class
-    else:
-        s_val = shap_values
-        exp_val = explainer_shap.expected_value
-
-    # Clear previous plots to prevent overlapping if the button is clicked multiple times
-    plt.clf() 
-    
-    plt.figure(figsize=(10, 3))
-    shap.force_plot(
-        exp_val, 
-        s_val, 
-        features_df, 
-        matplotlib=True,
-        show=False
-    )
-    plt.savefig("shap_plot.png", bbox_inches='tight', dpi=200)
-    st.image("shap_plot.png")
+st.caption("Disclaimer: This tool is for research and clinical reference only. Medical decisions should be made by qualified healthcare professionals based on complete clinical evaluation.")

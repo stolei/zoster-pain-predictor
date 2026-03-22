@@ -1,9 +1,14 @@
+# Core App Framework
 streamlit
-joblib
-lightgbm
-pandas
-scikit-learn
-shap
+
+# Data Manipulation
 numpy
+pandas
+
+# Machine Learning Model
+lightgbm
+joblib
+
+# Model Interpretability and Visualization
+shap
 matplotlib
-lime
