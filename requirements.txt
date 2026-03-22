@@ -3,3 +3,7 @@ joblib
 lightgbm
 pandas
 scikit-learn
+shap
+numpy
+matplotlib
+lime
