@@ -1,0 +1,14 @@
+# Core App Framework
+streamlit
+
+# Data Manipulation
+numpy
+pandas
+
+# Machine Learning Model
+CatBoost
+joblib
+
+# Model Interpretability and Visualization
+shap
+matplotlib
